@@ -237,19 +237,21 @@ function toggleAuthMode() {
 // ── Type-to-Search (Global Keyboard Capture) ────────────────────────
 function initTypeToSearch() {
     document.addEventListener('keydown', (e) => {
-        const tag = e.target.tagName;
-        if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
-        if (e.key === ' ' || e.key === 'Escape' || e.ctrlKey || e.altKey || e.metaKey) return;
+        const activeElement = document.activeElement;
+        const tag = activeElement?.tagName;
 
-        if (e.key === 'Backspace') {
-            els.searchInput.focus();
-            return;
-        }
+        const isTypingField =
+            tag === 'INPUT' ||
+            tag === 'TEXTAREA' ||
+            tag === 'SELECT' ||
+            activeElement?.isContentEditable;
 
-        if (e.key.length === 1) {
-            els.searchInput.focus();
-            // The character will naturally be typed into the input
-        }
+        if (isTypingField) return;
+        if (e.ctrlKey || e.altKey || e.metaKey) return;
+        if (e.key !== '/') return;
+
+        e.preventDefault();
+        els.searchInput.focus();
     });
 }
 
@@ -711,17 +713,52 @@ function bindEvents() {
     [els.weightAlpha, els.weightBeta, els.weightGamma].forEach((slider) => {
         slider.addEventListener('change', handleWeightChange);
     });
-}
+    // Weights
+    [els.weightAlpha, els.weightBeta, els.weightGamma].forEach((slider) => {
+        slider.addEventListener('change', handleWeightChange);
+    });
 
+    // Scroll Progress Bar
+    window.addEventListener('scroll', () => {
+        const progressBar = document.getElementById('scroll-progress');
+        if (!progressBar) return;
+        
+        const scrollY = window.scrollY;
+        const docHeight = document.documentElement.scrollHeight;
+        const windowHeight = window.innerHeight;
+        
+        const width = (scrollY / (docHeight - windowHeight)) * 100;
+        progressBar.style.width = width + "%";
+    });
+}
 // ── CSS spin animation ──────────────────────────────────────────────
 const spinStyle = document.createElement('style');
 spinStyle.textContent = `@keyframes spin { to { transform: rotate(360deg); } } .spin { animation: spin 1s linear infinite; }`;
 document.head.appendChild(spinStyle);
 
+// ── Back To Top ─────────────────────────────────────────────────────
+function initBackToTop() {
+    const backToTop = document.getElementById('backToTop');
+
+    if (!backToTop) return;
+
+    
+    backToTop.style.display = 'none';
+
+    window.addEventListener('scroll', () => {
+        backToTop.style.display =
+            window.scrollY > 700 ? 'block' : 'none';
+    });
+
+    backToTop.addEventListener('click', () => {
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+    });
+}
 // ── Init ────────────────────────────────────────────────────────────
 async function init() {
     bindEvents();
     initTypeToSearch();
+    initBackToTop();
 
     // Initialize Supabase client from backend config (no hardcoded keys)
     await initSupabase();
@@ -730,5 +767,4 @@ async function init() {
     initAuth().catch((e) => console.warn('Auth error:', e));
     checkStatus().catch((e) => console.warn('Status error:', e));
 }
-
 document.addEventListener('DOMContentLoaded', init);

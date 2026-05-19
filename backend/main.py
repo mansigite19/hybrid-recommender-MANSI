@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-from fastapi import FastAPI, UploadFile, File, HTTPException, Query
+from fastapi import FastAPI, UploadFile, File, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
@@ -19,6 +19,12 @@ from typing import Optional
 from dotenv import load_dotenv
 
 load_dotenv()
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="[%(levelname)s] %(asctime)s - %(message)s",
+)
+logger = logging.getLogger(__name__)
 
 from db import get_supabase, get_supabase_admin
 from data_adapter import adapt_data, read_file
@@ -29,6 +35,16 @@ from hybrid_model import HybridRecommender, bayesian_rating
 
 # ── App ──────────────────────────────────────────────────────────────
 app = FastAPI(title="Hybrid Recommender API", version="3.0")
+logger = logging.getLogger("hybrid_recommender.api")
+RESPONSE_TIME_HEADER = "X-Response-Time-ms"
+DEFAULT_SLOW_RESPONSE_THRESHOLD_MS = 1000.0
+
+
+def _get_slow_response_threshold_ms() -> float:
+    try:
+        return float(os.environ.get("RESPONSE_TIME_SLOW_MS", DEFAULT_SLOW_RESPONSE_THRESHOLD_MS))
+    except ValueError:
+        return DEFAULT_SLOW_RESPONSE_THRESHOLD_MS
 
 # CORS — restrict in production; allow localhost for development
 allowed_origins = os.environ.get("CORS_ORIGINS", "http://localhost:8000,http://127.0.0.1:8000").split(",")
@@ -38,6 +54,34 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PUT"],
     allow_headers=["Content-Type", "Authorization"],
 )
+
+
+@app.middleware("http")
+async def response_time_middleware(request: Request, call_next):
+    """Attach response duration headers and log every API request."""
+    started_at = time.perf_counter()
+    response = None
+
+    try:
+        response = await call_next(request)
+        return response
+    finally:
+        duration_ms = (time.perf_counter() - started_at) * 1000
+        status_code = response.status_code if response is not None else 500
+
+        if response is not None:
+            response.headers[RESPONSE_TIME_HEADER] = f"{duration_ms:.2f}"
+
+        log_fn = logger.warning if duration_ms >= _get_slow_response_threshold_ms() else logger.info
+        log_fn(
+            "request_completed",
+            extra={
+                "method": request.method,
+                "path": request.url.path,
+                "status_code": status_code,
+                "duration_ms": round(duration_ms, 2),
+            },
+        )
 
 # ── State ────────────────────────────────────────────────────────────
 models = {
@@ -114,7 +158,8 @@ def search_items(
                 'offset_val': offset,
             }).execute()
             products = result.data or []
-        except Exception:
+        except Exception as e:
+            logger.warning("Full-text search failed for query '%s': %s", q.strip(), e)
             # Fallback: do a LIKE search if FTS parsing fails
             result = sb.table('products') \
                 .select('id, title, description, category, rating, avg_sentiment, review_count') \
@@ -236,12 +281,14 @@ async def upload_dataset(file: UploadFile = File(...)):
         }
         if errors:
             result["warnings"] = errors[:5]  # Return first 5 errors
+            logger.warning("Imported dataset with %d batch warnings", len(errors))
+
+        logger.info("Imported %d products from %s", imported, filename)
         return result
     except HTTPException:
         raise
     except Exception as e:
-        import traceback
-        traceback.print_exc()
+        logger.error("Upload failed for %s: %s", filename, e, exc_info=True)
         # Don't leak internal details — log server-side, return generic message
         raise HTTPException(400, "Upload failed. Check file format and try again.")
 
@@ -269,6 +316,7 @@ def build_models():
         offset += page_size
 
     if not all_products:
+        logger.warning("Model build requested with no products in database")
         raise HTTPException(400, "No products in database. Upload data first.")
 
     import pandas as pd
@@ -311,8 +359,8 @@ def build_models():
                 interaction_df = pd.DataFrame(interaction_rows)
                 if interaction_df['user_id'].nunique() > 1:
                     collab_model = CollaborativeRecommender(interaction_df)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("Collaborative model data load failed: %s", e)
 
     # Hybrid model
     hybrid_model = HybridRecommender(content_model, collab_model, item_df)
@@ -326,6 +374,12 @@ def build_models():
     models["ready"] = True
     models["build_time"] = build_time
 
+    logger.info(
+        "Built recommendation models for %d items in %.2f seconds",
+        len(item_df),
+        build_time,
+    )
+
     return {
         "message": "Models built successfully!",
         "items": len(item_df),
@@ -337,17 +391,89 @@ def build_models():
 # ── Recommendations ────────────────────────────────────────────────
 
 @app.get("/api/recommend/{item_title}")
-def get_recommendations(item_title: str, top_n: int = 10):
+def get_recommendations(item_title: str, top_n: int = 10, explain: bool = Query(False)):
     """Get hybrid recommendations for an item."""
     if not models["ready"]:
         raise HTTPException(400, "Models not built. Build first via /api/build.")
-    recs = models["hybrid"].recommend(item_title, top_n=top_n)
+    recs = models["hybrid"].recommend(item_title, top_n=top_n, explain=explain)
     if not recs:
         raise HTTPException(404, "Item not found or no recommendations.")
     return {
         "query_item": item_title,
         "recommendations": recs,
         "weights": models["hybrid"].get_weights(),
+        "explain": explain,
+    }
+
+
+@app.get("/api/explain")
+def explain_recommendation(item: str, user: str):
+    """Explain WHY an item was recommended to a specific user."""
+    if not models["ready"]:
+        raise HTTPException(400, "Models not built. Build first via /api/build.")
+        
+    hybrid = models["hybrid"]
+    
+    # Check if item exists in our models
+    if item not in hybrid._rating_map:
+        raise HTTPException(404, "Item not found in recommendations database.")
+        
+    # Extract item scores
+    sentiment_score = hybrid._sentiment_map.get(item, 0.0)
+    bayesian_score = hybrid._rating_map.get(item, 0.0)
+    norm_sentiment = (sentiment_score + 1) / 2
+    
+    collab_score = 0.0
+    content_score = 0.0
+    
+    collab_model = models.get("collab")
+    if collab_model:
+        # Predict rating for the user and item
+        pred = collab_model.predict_rating(user, item)
+        if pred is not None:
+            collab_score = max(0.0, min(1.0, pred / 5.0))
+            
+        # For content score, compare against the user's top-rated item
+        user_history = collab_model.df[collab_model.df['user_id'] == user]
+        if not user_history.empty:
+            top_item = user_history.loc[user_history['rating'].idxmax()]['title']
+            content_model = models.get("content")
+            if content_model:
+                try:
+                    recs = content_model.recommend(top_item, top_n=100)
+                    for r in recs:
+                        if r['title'] == item:
+                            content_score = r['content_score']
+                            break
+                except Exception:
+                    pass
+    
+    # Build reasons
+    reasons = []
+    if collab_score > 0.7:
+        reasons.append("Similar to your top rated items")
+    elif collab_score > 0.5:
+        reasons.append("Matches your user profile")
+        
+    if norm_sentiment > 0.65:
+        reasons.append("High sentiment score")
+        
+    if bayesian_score > 4.0:
+        reasons.append("Popular in your category")
+        
+    reasons = reasons[:3]
+    if not reasons:
+        reasons.append("Recommended based on general popularity")
+
+    return {
+        "item": item,
+        "reasons": reasons,
+        "scores": {
+            "content": round(content_score, 4),
+            "collab": round(collab_score, 4),
+            "sentiment": round(norm_sentiment, 4),
+            "bayesian": round(bayesian_score, 4)
+        }
     }
 
 
