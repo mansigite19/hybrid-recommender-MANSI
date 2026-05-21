@@ -87,8 +87,36 @@ const els = {
     weightAlpha: $('weight-alpha'),
     weightBeta: $('weight-beta'),
     weightGamma: $('weight-gamma'),
+    categoryFilter: $('category-filter'),
+    ratingFilter: $('rating-filter'),
+    sentimentFilter: $('sentiment-filter'),
+    clearFiltersBtn: $('clear-filters'),
+    minPriceSlider: $('min-price'),
+    maxPriceSlider: $('max-price'),
+    minPriceValue: $('min-price-value'),
+    maxPriceValue: $('max-price-value'),
 };
 
+function loadPreferences() {
+    const saved = localStorage.getItem('userPreferences');
+
+    if (!saved) return;
+
+    try {
+        const prefs = JSON.parse(saved);
+
+        state.filters.category = prefs.category || '';
+        state.filters.rating = prefs.rating || '';
+        state.filters.sentiment = prefs.sentiment || '';
+
+        els.categoryFilter.value = state.filters.category;
+        els.ratingFilter.value = state.filters.rating;
+        els.sentimentFilter.value = state.filters.sentiment;
+
+    } catch (err) {
+        console.warn('Failed to load preferences:', err);
+    }
+}
 // ── Utilities ───────────────────────────────────────────────────────
 function toast(message, type = 'info') {
     const el = document.createElement('div');
@@ -147,6 +175,44 @@ function sentimentBadge(score) {
     return '<span class="product-card__sentiment sentiment-neutral">Neutral</span>';
 }
 
+function applyFilters(products) {
+    return products.filter((p) => {
+
+        const matchesCategory =
+            !state.filters.category ||
+            p.category === state.filters.category;
+
+        const matchesRating =
+            !state.filters.rating ||
+            (p.rating || 0) >= Number(state.filters.rating);
+
+        let sentiment = 'neutral';
+
+        if ((p.avg_sentiment || 0) > 0.05) {
+            sentiment = 'positive';
+        } else if ((p.avg_sentiment || 0) < -0.05) {
+            sentiment = 'negative';
+        }
+
+        const matchesSentiment =
+            !state.filters.sentiment ||
+            sentiment === state.filters.sentiment;
+        
+        const price = Number(p.price || 0);
+
+        const matchesPrice =
+        price >= state.filters.minPrice &&
+        price <= state.filters.maxPrice;
+
+        return (
+            matchesCategory &&
+            matchesRating &&
+            matchesSentiment &&
+            matchesPrice
+        );
+    });
+}
+
 function categoryIcon(cat) {
     const c = (cat || '').toLowerCase();
     if (c.includes('book') || c.includes('fiction') || c.includes('literature')) return '📚';
@@ -160,6 +226,37 @@ function categoryIcon(cat) {
     if (c.includes('cloth') || c.includes('fashion')) return '👕';
     if (c.includes('home') || c.includes('garden')) return '🏡';
     return '📦';
+}
+
+// ── Wishlist ────────────────────────────────────────────────────────
+function getWishlist() {
+    return JSON.parse(localStorage.getItem('wishlist')) || [];
+}
+
+function saveWishlist(items) {
+    localStorage.setItem('wishlist', JSON.stringify(items));
+}
+
+function isWishlisted(title) {
+    return getWishlist().some(item => item.title === title);
+}
+
+function toggleWishlist(product) {
+    let wishlist = getWishlist();
+
+    const exists = wishlist.some(item => item.title === product.title);
+
+    if (exists) {
+        wishlist = wishlist.filter(item => item.title !== product.title);
+        toast('Removed from wishlist', 'info');
+    } else {
+        wishlist.push(product);
+        toast('Added to wishlist', 'success');
+    }
+
+    saveWishlist(wishlist);
+
+    renderProducts(state.allProducts, false);
 }
 
 // ── API Helpers ─────────────────────────────────────────────────────
@@ -623,7 +720,21 @@ function createLazyImage(src, alt) {
 }
 
 function renderProducts(products, append) {
+    products = applyFilters(products);
+    els.productCount.textContent = `${products.length} products`;
+    if (!append) {
+    els.productGrid.innerHTML = '';
+}
     if (!append) state.products = [];
+    if (!products.length) {
+    els.productGrid.innerHTML = `
+        <div class="no-results">
+            <div class="no-results__icon">🔍</div>
+            <div>No matching results found</div>
+        </div>
+    `;
+    return;
+}
 
     const fragment = document.createDocumentFragment();
 
@@ -634,13 +745,20 @@ function renderProducts(products, append) {
         card.style.animationDelay = `${i * 50}ms`;
         const isChecked = state.heatmapSelected.includes(p.title);
         card.innerHTML = `
-            <div class="product-card__image">
-                ${!p.image ? categoryIcon(p.category) : ''}
+           <div class="product-card__image">
+            <button class="wishlist-btn" data-title="${p.title}">
+                ${isWishlisted(p.title) ? '❤️' : '🤍'}
+            </button>
+
+            ${categoryIcon(p.category)}
             </div>
             <div class="product-card__body">
                 ${p.category ? `<span class="product-card__category">${p.category}</span>` : ''}
                 <h3 class="product-card__title">${p.title || 'Untitled'}</h3>
                 <p class="product-card__desc">${p.description || 'No description available.'}</p>
+                <div class="product-card__price">
+                ₹${p.price || 0}
+                </div>
                 <div class="product-card__footer">
                     <div class="product-card__rating">
                         <div class="star-rating">${renderStars(p.rating || 0)}</div>
@@ -665,11 +783,20 @@ function renderProducts(products, append) {
         }
 
         // Click → get recommendations
-        card.querySelector('.btn--add-cart').addEventListener('click', (e) => {
+        card.querySelector('.wishlist-btn').addEventListener('click', (e) => {
             e.stopPropagation();
-            const title = e.target.dataset.title;
-            loadRecommendations(title);
-            toast(`Finding recommendations for "${title.substring(0, 40)}..."`, 'info');
+            toggleWishlist(p);
+        });
+
+        card.querySelector('.btn--add-cart').addEventListener('click', (e) => {
+        const title = e.target.dataset.title;
+
+        loadRecommendations(title);
+
+        toast(
+            `Finding recommendations for "${title.substring(0, 40)}..."`,
+            'info'
+            );
         });
 
         // Compare checkbox
@@ -937,6 +1064,59 @@ async function handleWeightChange() {
     } catch {}
 }
 
+function savePreferences() {
+    localStorage.setItem(
+        'userPreferences',
+        JSON.stringify(state.filters)
+    );
+
+    toast('Preferences saved', 'success');
+}
+
+const debouncedSavePreferences = debounce(savePreferences, 500);
+function updatePriceLabels() {
+    els.minPriceValue.textContent = `₹${state.filters.minPrice}`;
+    els.maxPriceValue.textContent = `₹${state.filters.maxPrice}`;
+}
+
+function handlePriceChange() {
+
+    let minVal = parseInt(els.minPriceSlider.value);
+    let maxVal = parseInt(els.maxPriceSlider.value);
+
+    if (minVal > maxVal) {
+        [minVal, maxVal] = [maxVal, minVal];
+    }
+
+    state.filters.minPrice = minVal;
+    state.filters.maxPrice = maxVal;
+
+    els.minPriceSlider.value = minVal;
+    els.maxPriceSlider.value = maxVal;
+
+    updatePriceLabels();
+
+    renderProducts(state.allProducts, false);
+
+    debouncedSavePreferences();
+}
+
+function populateCategoryFilter(products) {
+
+    const categories = [...new Set(
+        products
+            .map(p => p.category)
+            .filter(Boolean)
+    )];
+
+    els.categoryFilter.innerHTML = `
+        <option value="">All Categories</option>
+        ${categories.map(cat =>
+            `<option value="${cat}">${cat}</option>`
+        ).join('')}
+    `;
+}
+
 // ── Event Listeners ─────────────────────────────────────────────────
 function bindEvents() {
     // Search
@@ -1156,4 +1336,26 @@ async function init() {
     initAuth().catch((e) => console.warn('Auth error:', e));
     checkStatus().catch((e) => console.warn('Status error:', e));
 }
+
+// Debounce helper
+function debounce(func, delay) {
+  let timeout;
+
+  return function (...args) {
+    clearTimeout(timeout);
+
+    timeout = setTimeout(() => {
+      func.apply(this, args);
+    }, delay);
+  };
+}
+
+els.categoryFilter.addEventListener('change', (e) => {
+    state.filters.category = e.target.value;
+
+    renderProducts(state.allProducts, false);
+
+    debouncedSavePreferences();
+});
+
 document.addEventListener('DOMContentLoaded', init);
