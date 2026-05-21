@@ -78,7 +78,7 @@ jobs:
     if: github.event_name == 'pull_request_review' && github.event.review.state == 'approved'
     runs-on: ubuntu-latest
     steps:
-      - name: Add labels and auto-merge on approval
+      - name: Merge PR on approval
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -89,12 +89,6 @@ jobs:
             const reviewer = context.payload.review.user.login;
 
             try {
-              await github.rest.issues.addLabels({ owner, repo, issue_number: prNumber, labels: ['gssoc:approved', 'mentor:leonagoel'] });
-            } catch(e) {
-              console.log('Labels may already exist:', e.message);
-            }
-
-            try {
               await github.rest.issues.removeLabel({ owner, repo, issue_number: prNumber, name: 'status:review-needed' });
             } catch(e) {}
 
@@ -103,41 +97,21 @@ jobs:
             } catch(e) {}
 
             try {
-              const prData = await github.rest.pulls.get({ owner, repo, pull_number: prNumber });
-              const prNodeId = prData.data.node_id;
-
-              await github.graphql(`
-                mutation($pullRequestId: ID!) {
-                  enablePullRequestAutoMerge(input: {
-                    pullRequestId: $pullRequestId,
-                    mergeMethod: SQUASH
-                  }) {
-                    pullRequest { autoMergeRequest { mergeMethod } }
-                  }
-                }
-              `, { pullRequestId: prNodeId });
-
+              await github.rest.pulls.merge({
+                owner,
+                repo,
+                pull_number: prNumber,
+                merge_method: 'squash',
+                commit_title: context.payload.pull_request.title + ' (#' + prNumber + ')'
+              });
               await github.rest.issues.createComment({
                 owner, repo, issue_number: prNumber,
-                body: 'Approved by @' + reviewer + '!\n\ngssoc:approved + mentor:leonagoel confirmed.\n\nAuto-merge enabled - PR will merge once all CI checks pass.\n\nPoints will appear on the GSSoC leaderboard at the next 4 AM IST refresh.'
+                body: 'Merged! Approved by @' + reviewer + '. Points will reflect at next 4 AM IST leaderboard refresh.'
               });
-
             } catch(e) {
-              console.log('Auto-merge failed, trying direct merge:', e.message);
-              try {
-                await github.rest.pulls.merge({
-                  owner, repo, pull_number: prNumber,
-                  merge_method: 'squash',
-                  commit_title: context.payload.pull_request.title + ' (#' + prNumber + ')'
-                });
-                await github.rest.issues.createComment({
-                  owner, repo, issue_number: prNumber,
-                  body: 'Merged! Approved by @' + reviewer + '. Points will reflect at next 4 AM IST leaderboard refresh.'
-                });
-              } catch(mergeErr) {
-                await github.rest.issues.createComment({
-                  owner, repo, issue_number: prNumber,
-                  body: 'Approved by @' + reviewer + '! Labels gssoc:approved + mentor:leonagoel confirmed.\n\nPlease enable Allow auto-merge in repo Settings > General > Pull Requests, or merge manually.'
-                });
-              }
+              console.log('Direct merge failed:', e.message);
+              await github.rest.issues.createComment({
+                owner, repo, issue_number: prNumber,
+                body: 'Approved by @' + reviewer + '! Could not auto-merge: ' + e.message + '\n\nPlease merge manually.'
+              });
             }
