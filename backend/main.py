@@ -7,7 +7,7 @@ import sys
 import io
 import time
 import logging
-import math
+import re
 from collections import deque, Counter
 from threading import Lock
 
@@ -27,6 +27,8 @@ from fastapi import (
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi import Depends
 from pydantic import BaseModel
 from typing import Any, Optional
 from dotenv import load_dotenv
@@ -175,6 +177,23 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PUT"],
     allow_headers=["Content-Type", "Authorization"],
 )
+
+security = HTTPBearer()
+
+def verify_token(
+    credentials: HTTPAuthorizationCredentials = Depends(security)
+):
+    token = credentials.credentials
+    if not token:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    try:
+        sb = get_supabase()
+        user = sb.auth.get_user(token)
+        if not user:
+            raise HTTPException(status_code=401, detail="Invalid token")
+    except Exception:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    return token
 
 # ── Response Time Monitoring ────────────────────────────────────────
 SLOW_RESPONSE_THRESHOLD_MS = 500.0
@@ -386,7 +405,9 @@ def status():
 # ── Dashboard (admin metrics — issue #71) ───────────────────────────
 
 @app.get("/api/dashboard")
-def dashboard():
+def dashboard(
+    token: str = Depends(verify_token)
+):
     """Aggregate metrics for the admin dashboard."""
     sb = get_supabase()
 
@@ -691,7 +712,10 @@ def autocomplete_products(
 # ── Upload + Import ─────────────────────────────────────────────────
 
 @app.post("/api/upload")
-async def upload_dataset(file: UploadFile = File(...)):
+async def upload_dataset(
+    file: UploadFile = File(...),
+    token: str = Depends(verify_token)
+):
     """Upload a CSV or JSON dataset and import into Supabase."""
     import math
     filename = file.filename or "data.csv"
@@ -798,7 +822,9 @@ async def upload_dataset(file: UploadFile = File(...)):
 
 
 @app.post("/api/build")
-def build_models():
+def build_models(
+    token: str = Depends(verify_token)
+):
     """Build recommendation models from Supabase data."""
     sb = None
     all_products = []
@@ -1199,7 +1225,10 @@ def get_weights():
 
 
 @app.put("/api/weights")
-def update_weights(w: WeightsUpdate):
+def update_weights(
+    w: WeightsUpdate,
+    token: str = Depends(verify_token)
+    ):
     if not models["ready"]:
         raise HTTPException(400, "Models not built.")
     models["hybrid"].set_weights(w.alpha, w.beta, w.gamma)
@@ -1350,7 +1379,11 @@ def get_categories():
 # ── Purchases ───────────────────────────────────────────────────────
 
 @app.get("/api/purchases/{user_id}")
-def get_user_purchases(user_id: str, limit: int = 50):
+def get_user_purchases(
+    user_id: str, 
+    limit: int = 50,
+    token: str = Depends(verify_token)
+):
     """Get purchase history for a user (via anon client — RLS enforced)."""
     try:
         sb = get_supabase()
@@ -1367,7 +1400,10 @@ def get_user_purchases(user_id: str, limit: int = 50):
 
 
 @app.post("/api/purchases")
-def create_purchase(data: PurchaseCreate):
+def create_purchase(
+    data: PurchaseCreate,
+    token: str = Depends(verify_token)
+):
     """Record a purchase (validated input)."""
     try:
         sb = get_supabase()
@@ -1407,7 +1443,10 @@ def health_check():
 
 
 @app.post("/api/feedback")
-def submit_feedback(data: FeedbackCreate):
+def submit_feedback(
+    data: FeedbackCreate,
+    token: str = Depends(verify_token)
+    ):
 
     return {
         "message": "Feedback submitted successfully",
