@@ -33,8 +33,8 @@ class ContentRecommender:
         Returns list of dicts: [{ 'title', 'content_score' }, ...]
         """
         if title.lower() not in self._title_to_idx:
-        return []
-
+            return[]
+       
         idx = self._title_to_idx[title.lower()]
         query_vec = self.matrix[idx]
         scores = cosine_similarity(query_vec, self.matrix).flatten()

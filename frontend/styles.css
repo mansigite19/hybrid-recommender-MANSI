@@ -575,10 +575,13 @@ body {
 /* ── Product Grid ────────────────────────────────────────────────── */
 .product-grid {
     display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 20px;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 24px;
+    width: 100%;
+    padding: 16px;
+    box-sizing: border-box;
+    align-items: stretch;
 }
-
 .product-card {
     background: var(--bg-card);
     border-radius: var(--radius);
@@ -587,8 +590,13 @@ body {
     transition: var(--transition);
     cursor: pointer;
     animation: fadeInUp 400ms ease-out both;
-}
 
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    margin: 0;
+    box-sizing: border-box;
+}
 .product-card:hover {
     transform: translateY(-4px);
     box-shadow: var(--shadow-lg);
@@ -941,8 +949,12 @@ body {
     .product-grid, .skeleton-grid { grid-template-columns: repeat(3, 1fr); }
 }
 
+
 @media (max-width: 768px) {
-    .product-grid, .skeleton-grid { grid-template-columns: repeat(2, 1fr); }
+    .product-grid, .skeleton-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 20px;
+    }
 
     .header__inner { gap: 12px; }
     .header__search { max-width: none; }
@@ -951,14 +963,25 @@ body {
     .hero__subtitle { font-size: 14px; }
     .hero { padding: 40px 20px 36px; }
 
-    .controls__inner { flex-direction: column; align-items: flex-start; }
+    .controls__inner {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
     .weight-control { flex-wrap: wrap; }
 
-    .section-header { flex-direction: column; align-items: flex-start; gap: 4px; }
+    .section-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 4px;
+    }
 }
 
 @media (max-width: 480px) {
-    .product-grid, .skeleton-grid { grid-template-columns: 1fr; }
+    .product-grid, .skeleton-grid {
+        grid-template-columns: 1fr;
+        gap: 16px;
+    }
 
     .header { padding: 0 12px; }
     .logo-text { display: none; }
@@ -969,9 +992,11 @@ body {
     .search-shortcut { display: none; }
     .controls { padding: 10px 12px; }
 
-    .rec-card { min-width: 180px; max-width: 180px; }
+    .rec-card {
+        min-width: 180px;
+        max-width: 180px;
+    }
 }
-
 /* ── Animations (staggered card entrance) ────────────────────────── */
 .product-card:nth-child(1) { animation-delay: 0ms; }
 .product-card:nth-child(2) { animation-delay: 50ms; }
