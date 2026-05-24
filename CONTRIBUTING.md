@@ -129,6 +129,9 @@ Every PR description **must include**:
 ## Related issue
 Closes #<issue-number>
 ```
+> ⚠️ **Important:** Always use `Closes #<issue-number>` in your PR description (not just a mention like `#123`).  
+> Our bot reads this line to automatically copy the correct difficulty labels (`level:beginner`, `level:intermediate`, `level:advanced`) from the issue to your PR.  
+> **Without it, your PR won't get level labels — and that affects your GSSoC leaderboard points!**
 
 **Rules:**
 - One issue per PR — don't bundle unrelated changes
