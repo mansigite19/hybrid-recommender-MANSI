@@ -450,6 +450,15 @@ def health_check():
 
 
 # ── API Metrics ───────────────────────────────────────────────────────
+@app.get("/api/version")
+def get_version():
+    return {
+        "version": app.version,
+        "service": app.title,
+        "status": "running",
+    }
+
+
 @app.get("/api/metrics")
 def get_api_metrics():
     return get_response_metrics_snapshot()
