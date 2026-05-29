@@ -105,10 +105,7 @@ async function initSupabase() {
 const state = {
     user: null,
     isGuest: true,
-    products: [],
-    allProducts: [],
-    trending: [],
-    page: 1,
+    products: [],    trending: [],    page: 1,
     perPage: 20,
     totalProducts: 0,
     isLoading: false,
@@ -121,14 +118,6 @@ const state = {
     isAuthSignUp: false,
     modelReady: false,
     scrollObserver: null,
-    compareList: [],
-    heatmapSelected: [],
-    activeChips: new Set(['all']),
-    filters: {
-        category: '',
-        rating: '',
-        sentiment: '',
-    },
 };
 
 // ── DOM Elements ────────────────────────────────────────────────────
@@ -571,7 +560,25 @@ function initTypeToSearch() {
     });
 }
 
-// ── Search Dropdown ──────────────────────────────────────────────────
+// ── Search ──────────────────────────────────────────────────────────
+async function handleSearch(query) {
+    if (!query || query.length < 1) {
+        closeSearchDropdown();
+        return;
+    }
+
+    clearTimeout(state.searchTimer);
+    state.searchTimer = setTimeout(async () => {
+        try {
+            const data = await API.get(`/api/search?q=${encodeURIComponent(query)}&limit=8`);
+            state.searchResults = data.items || [];
+            state.selectedSearchIdx = -1;
+            renderSearchDropdown(state.searchResults, query);
+        } catch {
+            closeSearchDropdown();
+        }
+    }, 200);
+}
 
 function renderSearchDropdown(results, query) {
     if (!results.length) {
@@ -1080,13 +1087,7 @@ function renderProducts(products, options = {}) {
 
         // Click → get recommendations
         card.querySelector('.btn--add-cart').addEventListener('click', (e) => {
-            const wishlistBtn = card.querySelector('.wishlist-btn');
-
-            wishlistBtn.addEventListener('click', (e) => {
             e.stopPropagation();
-            toggleWishlist(p);
-            });
-
             const title = e.target.dataset.title;
             loadRecommendations(title);
             toast(`Finding recommendations for "${title.substring(0, 40)}..."`, 'info');
@@ -1125,13 +1126,28 @@ function renderProducts(products, options = {}) {
         }
 
         card.addEventListener('click', () => {
-            loadRecommendations(title);
+            loadRecommendations(p.title);
         });
 
         fragment.appendChild(card);
     });
 
     els.productGrid.appendChild(fragment);
+}
+
+function handleRecommendationClick(e) {
+    e.stopPropagation();
+
+    const title = e.currentTarget.dataset.title;
+
+    if (!title) return;
+
+    loadRecommendations(title);
+
+    toast(
+        `Finding recommendations for "${title.substring(0, 40)}..."`,
+        'info'
+    );
 }
 
 // ── Recommendations ─────────────────────────────────────────────────
