@@ -378,6 +378,10 @@ def _require_admin_access(request: Request) -> None:
         raise HTTPException(status_code=401, detail="Admin token required.")
 
 
+def _admin_access_dep(request: Request) -> None:
+    _require_admin_access(request)
+
+
 # CORS
 allowed_origins_env = os.environ.get("CORS_ORIGINS", "http://localhost:8000,http://127.0.0.1:8000")
 allowed_origins = [origin.strip() for origin in allowed_origins_env.split(",")]
@@ -1035,7 +1039,10 @@ async def upload_dataset(
 
 # ── Build Models ──────────────────────────────────────────────────────
 @app.post("/api/build")
-def build_models(_csrf: None = Depends(csrf_header_dep)):
+def build_models(
+    _csrf: None = Depends(csrf_header_dep),
+    _admin: None = Depends(_admin_access_dep),
+):
     global STAGING_MODEL_VERSION
     try:
        sb = get_supabase_admin()
@@ -1126,7 +1133,10 @@ def build_models(_csrf: None = Depends(csrf_header_dep)):
     }
 
 @app.post("/api/train/federated")
-def train_federated(req: FederatedTrainRequest):
+def train_federated(
+    req: FederatedTrainRequest,
+    _admin: None = Depends(_admin_access_dep),
+):
     sb = get_supabase()
     all_products = []
     page_size = 1000
@@ -1519,7 +1529,11 @@ def list_models():
         ],
     }
 @app.post("/api/models/{version}/promote")
-def promote_model(version: str, _csrf: None = Depends(csrf_header_dep)):
+def promote_model(
+    version: str,
+    _csrf: None = Depends(csrf_header_dep),
+    _admin: None = Depends(_admin_access_dep),
+):
     global ACTIVE_MODEL_VERSION, SHADOW_MODEL_VERSION, STAGING_MODEL_VERSION
 
     if version not in MODEL_REGISTRY:
@@ -1558,7 +1572,11 @@ def promote_model(version: str, _csrf: None = Depends(csrf_header_dep)):
     }
 
 @app.post("/api/models/{version}/shadow")
-def move_model_to_shadow(version: str, _csrf: None = Depends(csrf_header_dep)):
+def move_model_to_shadow(
+    version: str,
+    _csrf: None = Depends(csrf_header_dep),
+    _admin: None = Depends(_admin_access_dep),
+):
     global SHADOW_MODEL_VERSION, STAGING_MODEL_VERSION
 
     if version not in MODEL_REGISTRY:
@@ -1588,6 +1606,7 @@ def get_weights():
 def update_weights(
     w: WeightsUpdate,
     _csrf: None = Depends(csrf_header_dep),
+    _admin: None = Depends(_admin_access_dep),
 ):
     if not models["ready"]:
         raise HTTPException(400, "Models not built.")
