@@ -2065,7 +2065,6 @@ def get_trending_products(
 
 # ── Feedback ──────────────────────────────────────────────────────────
 @app.post("/api/feedback")
-@app.post("/api/feedback")
 def submit_feedback(
     data: FeedbackCreate,
     request: Request,
