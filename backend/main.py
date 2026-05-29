@@ -356,6 +356,7 @@ def _apply_rate_limit(
     return None
 
 
+
 def _extract_bearer_token(value: str | None) -> str:
     if not value:
         return ""
@@ -936,19 +937,26 @@ def fuzzy_search_items(
 
 
 def _validate_upload_bytes(filename: str, ext: str, contents: bytes) -> None:
+    """Validate raw upload bytes: empty, size, binary, and content-type checks."""
     if not contents:
         raise HTTPException(status_code=400, detail="Uploaded file is empty.")
-    if b'\x00' in contents:
+    if len(contents) > MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail=f"Uploaded file exceeds {MAX_UPLOAD_BYTES} bytes.")
+    if b"\x00" in contents[:4096]:
         raise HTTPException(status_code=400, detail="Uploaded file appears to be binary.")
     try:
         decoded = contents.decode("utf-8")
     except UnicodeDecodeError:
-        raise HTTPException(status_code=400, detail="Uploaded file appears to be binary.")
-    
+        raise HTTPException(status_code=400, detail="Uploaded file must be UTF-8 encoded.")
+
     stripped = decoded.strip()
+    lowered_name = filename.lower()
     if ext == ".csv":
-        if (stripped.startswith("{") and stripped.endswith("}")) or (stripped.startswith("[") and stripped.endswith("]")):
+        lowered_sample = stripped[:128].lower()
+        if lowered_sample.startswith(("{", "[", "<!doctype", "<html", "<?xml")):
             raise HTTPException(status_code=400, detail="CSV uploads must contain CSV content.")
+        if not lowered_name.endswith(".csv"):
+            raise HTTPException(status_code=400, detail="CSV uploads must use a .csv filename.")
     elif ext == ".json":
         if not (stripped.startswith("{") or stripped.startswith("[")):
             raise HTTPException(status_code=400, detail="JSON uploads must contain JSON content.")
@@ -956,7 +964,7 @@ def _validate_upload_bytes(filename: str, ext: str, contents: bytes) -> None:
         try:
             json.loads(stripped)
         except json.JSONDecodeError:
-            raise HTTPException(status_code=400, detail="JSON uploads must contain JSON content.")
+            raise HTTPException(status_code=400, detail="JSON uploads must contain valid JSON.")
 
 
 # ── Upload ────────────────────────────────────────────────────────────
