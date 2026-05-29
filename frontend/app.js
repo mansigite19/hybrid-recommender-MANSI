@@ -575,24 +575,26 @@ function initTypeToSearch() {
 
 function renderSearchDropdown(results, query) {
     if (!results.length) {
-        closeSearchDropdown();
+        els.searchDropdown.innerHTML = `
+            <div style="padding:20px;text-align:center;color:var(--text-muted);font-size:13px;">
+                No results for "${query}"
+            </div>`;
+        els.searchDropdown.classList.add('active');
+        setSearchDropdownExpanded(true);
         return;
     }
 
-    els.searchDropdown.innerHTML = results
-        .map((title, index) => {
-            const safeTitle = escapeHtml(title);
-            return `
-            <div
-                class="search-result ${index === state.selectedSearchIdx ? 'active' : ''}"
-                data-title="${safeTitle}"
-                data-idx="${index}"
-            >
-                <span class="search-result__icon">🔍</span>
-                <div class="search-result__info">
-                    <div class="search-result__title">
-                        ${highlightMatch(title, query)}
-                    </div>
+    els.searchDropdown.innerHTML = results.map((r, i) => `
+        <div class="search-result ${i === state.selectedSearchIdx ? 'active' : ''}"
+            tabindex="0"
+            role="button"
+             data-title="${r.title}" data-idx="${i}">
+            <span style="font-size:20px;">${categoryIcon(r.category)}</span>
+            <div class="search-result__info">
+                <div class="search-result__title">${highlightMatch(r.title, query)}</div>
+                <div class="search-result__meta">
+                    ★ ${(r.rating || 0).toFixed(1)}
+                    ${r.category ? `· <span class="search-result__category">${r.category}</span>` : ''}
                 </div>
             </div>
         `;
@@ -600,6 +602,7 @@ function renderSearchDropdown(results, query) {
         .join('');
 
     els.searchDropdown.classList.add('active');
+    setSearchDropdownExpanded(true);
 
     // Click suggestion
     els.searchDropdown.querySelectorAll('.search-result').forEach((el) => {
@@ -607,6 +610,28 @@ function renderSearchDropdown(results, query) {
             const title = el.dataset.title;
             selectSearchResult(title);
         });
+        el.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        el.click();
+            }
+        });
+        el.addEventListener('keydown', (e) => {
+    const items = [...els.searchDropdown.querySelectorAll('.search-result')];
+    const currentIndex = items.indexOf(el);
+
+    if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        const next = items[(currentIndex + 1) % items.length];
+        next.focus();
+    }
+
+    if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        const prev = items[(currentIndex - 1 + items.length) % items.length];
+        prev.focus();
+    }
+});
     });
 }
 
@@ -630,10 +655,14 @@ function selectSearchResult(title) {
     loadRecommendations(title);
 }
 
+function setSearchDropdownExpanded(expanded) {
+    els.searchInput.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+}
 
 function closeSearchDropdown() {
     els.searchDropdown.classList.remove('active');
     state.selectedSearchIdx = -1;
+    setSearchDropdownExpanded(false);
 }
 
 // Close dropdown when clicking outside
@@ -1420,6 +1449,7 @@ function closeProductModal() {
 // ── Event Listeners ─────────────────────────────────────────────────
 function bindEvents() {
     // Search
+    els.searchInput.setAttribute('aria-expanded', 'false');
     els.searchInput.addEventListener('input', (e) => handleSearch(e.target.value));
     els.searchInput.addEventListener('keydown', handleSearchKeydown);
     els.searchInput.addEventListener('focus', () => {
