@@ -1,6 +1,10 @@
 """
 Unit and integration tests for the NLP issue triage classifier, rule overrides,
+<<<<<<< HEAD
 assignee suggestor, and GitHub API action layouts for Issue #536.
+=======
+assignee suggestor, and GitHub API action layouts for Issue #625.
+>>>>>>> upstream/main
 """
 
 import pytest
@@ -65,6 +69,8 @@ def test_predict_fallback_when_sklearn_missing():
         assert isinstance(prediction, dict)
         assert "type" in prediction
         assert "fallback" in prediction["type"]["reason"].lower()
+        assert prediction["type"]["reason"] == "Default fallback framework" or "keyword" in prediction["type"]["reason"].lower()
+
 
 def test_predict_no_matching_keywords_defaults():
     """Verifies fallback values trigger when an issue matches zero keyword tokens."""
@@ -94,6 +100,10 @@ def test_security_keyword_override_takes_precedence():
     # Requirement: Assert security takes precedence over the low priority beginner labels
     assert prediction["type"]["label"] == "security"
     assert prediction["priority"]["label"] == "critical"
+<<<<<<< HEAD
+=======
+    assert prediction["level"]["label"] == "critical"
+>>>>>>> upstream/main
 
 
 # ===========================================================================

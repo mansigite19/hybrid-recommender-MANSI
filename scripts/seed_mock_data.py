@@ -5,17 +5,27 @@ Creates realistic user-product interactions to solve the cold start problem.
 Usage:
     python scripts/seed_mock_data.py
     python scripts/seed_mock_data.py --users 50 --purchases 2000
+
+Optimized via Issue #490: Implements strict pathlib absolute context mappings 
+to prevent relative lookup path anomalies across multi-tier runtime environments.
 """
 import os
 import sys
 import random
 import argparse
+import secrets
 import string
+from pathlib import Path
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+# --- FIX FOR ISSUE #490: Standardize absolute resource paths using pathlib utilities ---
+SCRIPT_DIR = Path(__file__).parent.resolve()
+PROJECT_ROOT = SCRIPT_DIR.parent
+
+# Safely append project root to sys.path using absolute system reference strings
+sys.path.insert(0, str(PROJECT_ROOT))
 
 from tqdm import tqdm
-from db import get_supabase_admin
+from src.data.db import get_supabase_admin
 
 
 FIRST_NAMES = [
@@ -45,6 +55,24 @@ REVIEW_TEMPLATES = [
 ]
 
 
+def generate_mock_password(length=24):
+    """Generate a high-entropy password for throwaway mock accounts."""
+    if length < 16:
+        raise ValueError("Mock user passwords must be at least 16 characters.")
+
+    alphabet = string.ascii_letters + string.digits + "!@#$%^&*()-_=+"
+    required = [
+        secrets.choice(string.ascii_lowercase),
+        secrets.choice(string.ascii_uppercase),
+        secrets.choice(string.digits),
+        secrets.choice("!@#$%^&*()-_=+"),
+    ]
+    remaining = [secrets.choice(alphabet) for _ in range(length - len(required))]
+    chars = required + remaining
+    secrets.SystemRandom().shuffle(chars)
+    return ''.join(chars)
+
+
 def seed_mock_data(num_users=100, num_purchases=5000):
     sb = get_supabase_admin()
 
@@ -72,7 +100,7 @@ def seed_mock_data(num_users=100, num_purchases=5000):
         name = random.choice(FIRST_NAMES)
         suffix = ''.join(random.choices(string.digits, k=4))
         email = f"mock_{name.lower()}_{suffix}@demo.hybridrec.test"
-        password = f"MockUser{suffix}!{random.randint(100,999)}"
+        password = generate_mock_password()
         try:
             user_resp = sb.auth.admin.create_user({
                 "email": email,
@@ -161,7 +189,7 @@ def seed_mock_data(num_users=100, num_purchases=5000):
         try:
             sb.table('reviews').upsert(batch, on_conflict='user_id,product_id').execute()
         except Exception as e:
-            pass
+            print(f"  Warning: Failed to upsert reviews batch: {str(e)[:100]}")
 
     print(f"\n  {'='*50}")
     print(f"  ✅ Seeded {len(mock_users)} users, {inserted:,} purchases, {len(reviews_data):,} reviews")
